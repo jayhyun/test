@@ -1,0 +1,113 @@
+---
+title: "Data manipulation and Drawing abundance bar plot"
+output: html_document
+---
+
+Bacterial abundance on the genus level<br>
+-------------------------------------- 
+
+<br>
+Opening packages
+```{r packages}
+rm(list=ls())
+setwd('~/Desktop/Projects/Project_MISC13_Flohr_EAT_study/20200228_lefse_randomizationgroup')
+#library (gplots) #library for graphics
+#library (lattice) #library for multivariate graphics)
+#library(RColorBrewer) #Provides colors according to a variable
+library(reshape2) #Implies the functions melt and cast to restructure and aggregate data
+library(ggplot2)
+library(dplyr)
+library(xlsx)
+#library(nortest)
+#library(stats)
+#library(grid)
+```
+<br>
+
+**Load data**
+Input file: OTU based *.tax.summary file generated in mothur
+```{r data}
+# table <- read.table(file='~/Biostatistics.Project_Tetsuro/Tetsuro.an.0.03.cons.tax.summary', sep="\t", header=T, stringsAsFactors=T)
+table <- read.csv(file="all.trim.unique.good.filter.unique.subsample.pick.precluster.pds.wang.pick.tax.summary", sep="\t", header=T, stringsAsFactors=T)
+
+# Alternatively, you can use the tax.summary file that is generated before the OTU based analysis
+# table <- read.table(file="SS.shhh.trim.unique.good.filter.unique.precluster.pick.pds.wang.pick.tax.summary", sep="\t", header=T, stringsAsFactors=T) 
+```
+
+
+**File reading and manipulation**
+```{r table opening and labeling fixing}
+#cleaning up the names a little bit 
+names(table)<-gsub("..empty.._.empty._.empty._.empty._.empty", "", names(table))
+names(table)<-gsub("_.empty._.empty._.empty._.empty.", "", names(table))
+names(table)<-gsub("Water_00.Water._Water_Water_Water_Water", "Water", names(table))
+names(table)<-gsub("Spike_00.Spike._Spike_Spike_Spike_Spike", "Spike", names(table))
+names(table)<-gsub("BMCv13_00.BMCvJANMAR._BMCv13_BMCv13_BMCv13_BMCv13", "Mock", names(table))
+names(table)
+table$X<-NULL
+table$taxon.1<-NULL
+colnames(table) <- gsub("(KCFE_\\d\\d\\d\\d).*", "\\1", colnames(table))
+
+metadata <- data.frame(read.csv(file="all_meta.csv", stringsAsFactors=T), stringsAsFactors=T)
+metadata$sample_name <- gsub("KCFE-(\\d\\d\\d\\d).*", "KCFE_\\1", metadata$sample.name)
+
+sel_list <- gsub("-", "_",metadata$sample_name[metadata$age.group.of.sample=="12m"])
+
+table2 <- table[, gsub("(.*)_S\\d*", "\\1", colnames(table)) %in% sel_list]
+table <- cbind(table[,1:4], table2)
+```
+<br>
+
+<br>
+**Table manipulations for next analysis**
+```{r table}
+ratio_table <- function(df){
+  return(data.frame(t(apply(df, 1, function(x){return(unlist(x/df[1,]))})), stringsAsFactors=F))
+}
+ratio_df <- cbind(table[,1:4], ratio_table(table2))
+```
+
+**genus_table**
+```{r}
+ratio_df_genus <- subset(ratio_df, taxlevel==6)
+ratio_df1 <- ratio_df_genus[,5:ncol(ratio_df_genus)]
+rownames(ratio_df1) <- paste(ratio_df_genus$taxon, ratio_df_genus$rankID, sep="_")
+
+ratio_df1 <- ratio_df1[rowSums(ratio_df1)!=0,]
+```
+
+**Separating metadata**
+```{r}
+metadata <- metadata[metadata$age.group.of.sample=="12m",]
+#ratio_df2 <- ratio_df1[rowMeans(ratio_df1) > 0.01,]
+
+metadata3 <- metadata[order(metadata$sample_name),]
+
+sel_names <- c("Hungatella", "Actinomyces", "Catenibacterium")
+
+j <- sel_names[1]
+
+cc <- NULL
+for (j in sel_names){
+  xx <- data.frame(metadata3$randomization.group)
+  aa <- data.frame(t(ratio_df1[grep(j, rownames(ratio_df1)),xx=="Standard Introduction"]))
+  bb <- data.frame(t(ratio_df1[grep(j, rownames(ratio_df1)),xx=="Early Introduction"]))
+  
+  cc <- rbind(cc, c(j, mean(as.numeric(aa[,1])), mean(as.numeric(bb[,1]))))
+}
+
+cc <- data.frame(cc, stringsAsFactors=F)
+colnames(cc) <- c("taxa", "mean_aa", "mean_bb")
+
+melted_cc <- melt(cc, id=c("taxa"))
+melted_cc$taxa <- factor(melted_cc$taxa, levels=sel_names)
+melted_cc$variable <- factor(melted_cc$variable, levels=c("mean_aa", "mean_bb"))
+
+pdf("Randgroup_12m_lefse.pdf", width=4, height=5)
+ggplot(melted_cc) +
+  geom_bar(aes(x=variable, y=as.numeric(value), group=variable, fill=variable), stat='identity', position=position_dodge()) +
+  theme_bw() + facet_wrap(~taxa, scales='free', nrow=2) +
+  theme(axis.text.x=element_text(angle=90, vjust=0.5, hjust=1)) 
+dev.off()
+
+```
